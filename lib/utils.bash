@@ -26,6 +26,7 @@ sort_versions() {
 
 list_github_tags() {
 	git ls-remote --tags --refs "$GH_REPO" |
+		grep -vE "chart-|k3k-" |
 		grep -o 'refs/tags/.*' | cut -d/ -f3- |
 		sed 's/^v//' # NOTE: You might want to adapt this sed to remove non-version strings from tags
 }
@@ -36,13 +37,51 @@ list_all_versions() {
 	list_github_tags
 }
 
+get_platform() {
+	local platform
+	platform="$(uname | tr '[:upper:]' '[:lower:]')"
+	if [[ $(uname -s) == "Darwin" ]]; then
+		echo "$platform"
+	elif [[ $(uname -s) == "Linux" ]]; then
+		echo "$platform"
+	else
+		echo >&2 'Platform not supported' && exit 1
+	fi
+}
+
+get_arch() {
+	if [[ $(uname -m) == "x86_64" ]]; then
+		echo "amd64"
+	elif [[ $(uname -m) == "arm64" ]]; then
+		echo "arm64"
+	elif [[ $(uname -m) == "aarch64" ]]; then
+		echo "aarch64"
+	else
+		echo >&2 'Architecture not supported' && exit 1
+	fi
+}
+
 download_release() {
-	local version filename url
+	local suffix version filename url platform arch
 	version="$1"
 	filename="$2"
+	platform="$3"
+	arch="$4"
+	suffix=""
+
+	case $platform in
+	"darwin")
+		suffix="-${platform}-${arch}"
+		;;
+	*)
+		if [ "$arch" != "amd64" ]; then
+			suffix="-${arch}"
+		fi
+		;;
+	esac
 
 	# TODO: Adapt the release URL convention for k3kcli
-	url="$GH_REPO/archive/v${version}.tar.gz"
+	url="${GH_REPO}/releases/download/v${version}/${TOOL_NAME}${suffix}"
 
 	echo "* Downloading $TOOL_NAME release $version..."
 	curl "${curl_opts[@]}" -o "$filename" -C - "$url" || fail "Could not download $url"
@@ -59,7 +98,9 @@ install_version() {
 
 	(
 		mkdir -p "$install_path"
-		cp -r "$ASDF_DOWNLOAD_PATH"/* "$install_path"
+		cp -r "$ASDF_DOWNLOAD_PATH"/* "$install_path/$TOOL_NAME"
+
+		chmod +x "$install_path/$TOOL_NAME"
 
 		# TODO: Assert k3kcli executable exists.
 		local tool_cmd
